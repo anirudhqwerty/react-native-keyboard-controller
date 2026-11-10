@@ -1,0 +1,133 @@
+name: Verify status bar style transitions
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        type: choice
+        options: [before, after]
+        default: before
+      api:
+        type: choice
+        options: ["34", "36"]
+        default: "34"
+permissions:
+  contents: read
+jobs:
+  js:
+    if: inputs.phase == 'after'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn install --frozen-lockfile --cwd example
+      - run: yarn install --frozen-lockfile --cwd FabricExample
+      - run: yarn typescript
+      - run: yarn lint
+      - run: yarn prettier '**/*' --ignore-unknown --check
+      - run: yarn test src --runInBand
+      - run: yarn --cwd example test --runInBand
+      - run: yarn --cwd FabricExample test --runInBand
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PHASE: ${{ inputs.phase }}
+      API: ${{ inputs.api }}
+      GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.workers.max=2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free hosted runner disk
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: yarn
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - run: yarn install --frozen-lockfile
+      - run: yarn install --frozen-lockfile --cwd FabricExample
+      - name: Configure focused runnable reproduction
+        shell: bash
+        run: |
+          cp e2e/status-bar-style/App.tsx FabricExample/src/App.tsx
+          cat >> FabricExample/android/build.gradle <<'GRADLE'
+          allprojects {
+            configurations.configureEach {
+              resolutionStrategy.force 'androidx.core:core:1.18.0', 'androidx.core:core-ktx:1.18.0'
+            }
+          }
+          GRADLE
+          mkdir -p evidence
+          cat > "$RUNNER_TEMP/run-status-bar.sh" <<'SH'
+          #!/usr/bin/env bash
+          set +e
+          cd "$GITHUB_WORKSPACE/FabricExample/android"
+          adb shell getprop ro.product.model > "$GITHUB_WORKSPACE/evidence/device.txt"
+          adb shell getprop ro.build.version.release >> "$GITHUB_WORKSPACE/evidence/device.txt"
+          ./gradlew connectedReleaseAndroidTest -DtestBuildType=release -PreactNativeArchitectures=x86_64 -Pandroid.testInstrumentationRunnerArguments.class=com.keyboardcontrollerfabricexample.StatusBarStyleTest -Pandroid.testInstrumentationRunnerArguments.phase="$PHASE" --max-workers=2
+          result=$?
+          adb logcat -d -s StatusBarRegression:I > "$GITHUB_WORKSPACE/evidence/$PHASE-api$API-state.txt"
+          adb shell dumpsys window windows > "$GITHUB_WORKSPACE/evidence/$PHASE-api$API-windows.txt"
+          adb pull /sdcard/Android/data/com.keyboardcontrollerfabricexample/files/status-bar-evidence "$GITHUB_WORKSPACE/evidence/"
+          exit "$result"
+          SH
+      - name: Android release and instrumentation compilation
+        working-directory: FabricExample/android
+        run: ./gradlew assembleRelease assembleReleaseAndroidTest -DtestBuildType=release -PreactNativeArchitectures=x86_64 --max-workers=2
+      - name: Enable hosted KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Execute real provider and Modal transitions
+        id: device
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2.33.0
+        with:
+          api-level: ${{ inputs.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash "$RUNNER_TEMP/run-status-bar.sh"
+      - name: Validate before or after behavioral result
+        env:
+          DEVICE_OUTCOME: ${{ steps.device.outcome }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          root = pathlib.Path('FabricExample/android/app/build/outputs/androidTest-results')
+          files = list(root.rglob('*.xml'))
+          assert files, 'No instrumentation test results: cannot claim reproduction'
+          cases = [c for f in files for c in ET.parse(f).getroot().iter('testcase')]
+          assert len(cases) == 1 and cases[0].get('name') == 'statusBarStylesFollowProviderAndModal', [(c.attrib) for c in cases]
+          errors = list(cases[0].findall('failure')) + list(cases[0].findall('error'))
+          if os.environ['PHASE'] == 'before':
+              assert len(errors) == 1 and 'STATUS_BAR_APPEARANCE_MISMATCH' in ET.tostring(errors[0], encoding='unicode'), ET.tostring(cases[0], encoding='unicode')
+              print('Verified unfixed native appearance regression')
+          else:
+              assert not errors and os.environ['DEVICE_OUTCOME'] == 'success', ET.tostring(cases[0], encoding='unicode')
+              print('Verified provider and Modal transitions on device')
+          assert len(list(pathlib.Path('evidence').rglob('*.png'))) == 8
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: status-bar-${{ inputs.phase }}-api${{ inputs.api }}
+          path: |
+            evidence/
+            FabricExample/android/app/build/outputs/androidTest-results/
+            FabricExample/android/app/build/reports/androidTests/
+          retention-days: 14
