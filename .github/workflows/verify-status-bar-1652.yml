@@ -4,7 +4,7 @@ on:
     inputs:
       phase:
         type: choice
-        options: [before, after]
+        options: [before, after, checks]
         default: before
       api:
         type: choice
@@ -14,7 +14,7 @@ permissions:
   contents: read
 jobs:
   js:
-    if: inputs.phase == 'after'
+    if: inputs.phase != 'before' && inputs.api == '34'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -32,7 +32,34 @@ jobs:
       - run: yarn test src --runInBand
       - run: yarn --cwd example test --runInBand
       - run: yarn --cwd FabricExample test --runInBand
+  android:
+    if: inputs.phase != 'before' && inputs.api == '34'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: yarn
+      - uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - run: yarn install --frozen-lockfile
+      - uses: touchlab-lab/ktlint-action-setup@1.0.0
+        with:
+          ktlint_version: 1.3.1
+      - run: ktlint 'android/src/**/*.kt'
+      - run: curl -sSLO https://github.com/detekt/detekt/releases/download/v1.23.1/detekt-cli-1.23.1.zip && unzip detekt-cli-1.23.1.zip
+      - run: ./detekt-cli-1.23.1/bin/detekt-cli --config android/detekt.yml --build-upon-default-config --input android/src
+      - working-directory: android
+        run: ./gradlew lint assembleDebug testDebugUnitTest -PreactNativeVersion=0.76.2 --max-workers=2
   native:
+    if: inputs.phase != 'checks'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
