@@ -37,28 +37,28 @@ public class StatusBarStyleTest {
     assertTrue("Requires real platform appearance API", Build.VERSION.SDK_INT >= 31);
     try (ActivityScenario<MainActivity> scenario = ActivityScenario.launch(MainActivity.class)) {
       scenario.onActivity(value -> activity = value);
-      assertNotNull(device.wait(Until.findObject(By.text("Mount provider")), 90000));
+      assertNotNull(device.wait(Until.findObject(By.desc("Mount provider")), 90000));
       capture("startup-light");
       click("Mount provider");
-      assertNotNull(device.wait(Until.findObject(By.text("Open modal")), 15000));
+      assertNotNull(device.wait(Until.findObject(By.desc("Open modal")), 15000));
       InstrumentationRegistry.getInstrumentation().runOnMainSync(() ->
           assertTrue("KeyboardProvider native view must be active", EdgeToEdgeViewRegistry.INSTANCE.get().getActive()));
       check("provider-light", false, false);
       click("Dark content");
       check("provider-dark", true, false);
       click("Open modal");
-      assertNotNull(device.wait(Until.findObject(By.text("Close modal")), 15000));
+      assertNotNull(device.wait(Until.findObject(By.desc("Close modal")), 15000));
       check("modal-dark", true, true);
       click("Light content");
       check("modal-light", false, true);
       click("Dark content");
       check("modal-dark-again", true, true);
       click("Close modal");
-      assertNotNull(device.wait(Until.findObject(By.text("Open modal")), 15000));
+      assertNotNull(device.wait(Until.findObject(By.desc("Open modal")), 15000));
       click("Light content");
       check("provider-light-again", false, false);
       click("Open modal");
-      assertNotNull(device.wait(Until.findObject(By.text("Close modal")), 15000));
+      assertNotNull(device.wait(Until.findObject(By.desc("Close modal")), 15000));
       check("new-modal-light", false, true);
       click("Close modal");
       assertTrue("STATUS_BAR_APPEARANCE_MISMATCH " + mismatches, mismatches.isEmpty());
@@ -66,7 +66,7 @@ public class StatusBarStyleTest {
   }
 
   private void click(String text) {
-    UiObject2 button = device.wait(Until.findObject(By.text(text)), 15000);
+    UiObject2 button = device.wait(Until.findObject(By.desc(text)), 15000);
     assertNotNull("Missing button: " + text, button);
     button.click();
     device.waitForIdle();

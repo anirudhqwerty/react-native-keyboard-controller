@@ -19,9 +19,10 @@ export default function StatusBarRegression() {
       <Text style={{ color: style === "dark-content" ? "black" : "white" }}>
         {`Style: ${style}`}
       </Text>
-      <Button title="Dark content" onPress={() => setStyle("dark-content")} />
-      <Button title="Light content" onPress={() => setStyle("light-content")} />
+      <Button accessibilityLabel="Dark content" title="Dark content" onPress={() => setStyle("dark-content")} />
+      <Button accessibilityLabel="Light content" title="Light content" onPress={() => setStyle("light-content")} />
       <Button
+        accessibilityLabel={inModal ? "Close modal" : "Open modal"}
         title={inModal ? "Close modal" : "Open modal"}
         onPress={() => setModal(!inModal)}
       />
@@ -32,7 +33,7 @@ export default function StatusBarRegression() {
     return (
       <View style={{ flex: 1, paddingTop: 80 }}>
         <StatusBar barStyle="light-content" />
-        <Button title="Mount provider" onPress={() => setMounted(true)} />
+        <Button accessibilityLabel="Mount provider" title="Mount provider" onPress={() => setMounted(true)} />
       </View>
     );
   }
